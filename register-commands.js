@@ -1,10 +1,22 @@
 import 'dotenv/config';
-import { REST, Routes, SlashCommandBuilder } from 'discord.js';
+import {
+  ApplicationCommandType,
+  ContextMenuCommandBuilder,
+  PermissionFlagsBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+} from 'discord.js';
 
 const commands = [
   new SlashCommandBuilder()
     .setName('ping')
     .setDescription('Replies with pong!'),
+  new ContextMenuCommandBuilder()
+    .setName('Move')
+    .setType(ApplicationCommandType.Message)
+    .setDMPermission(false)
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 ].map((cmd) => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
