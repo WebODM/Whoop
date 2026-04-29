@@ -16,6 +16,7 @@ const MOVE_WEBHOOK_NAME = 'Whoop Move Relay';
 const MOVE_TARGET_CHANNEL_TYPES = [
   ChannelType.GuildText,
   ChannelType.GuildAnnouncement,
+  ChannelType.GuildForum,
   ChannelType.PublicThread,
   ChannelType.PrivateThread,
   ChannelType.AnnouncementThread,
@@ -61,25 +62,60 @@ function isSupportedMoveTarget(channel) {
   return channel?.guild && MOVE_TARGET_CHANNEL_TYPES.includes(channel.type);
 }
 
+function hasWebhookMethods(channel) {
+  return (
+    channel &&
+    typeof channel.fetchWebhooks === 'function' &&
+    typeof channel.createWebhook === 'function'
+  );
+}
+
+function createForumThreadName(message) {
+  const baseName = message.content
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 90);
+
+  if (baseName.length > 0) {
+    return baseName;
+  }
+
+  return `Moved message from ${message.author.username}`;
+}
+
 function getWebhookTarget(channel) {
+  if (channel.type === ChannelType.GuildForum) {
+    if (!hasWebhookMethods(channel)) {
+      throw new Error('Target forum channel does not support webhooks.');
+    }
+
+    return {
+      webhookChannel: channel,
+      threadId: undefined,
+      threadName: undefined,
+    };
+  }
+
   if (channel.isThread()) {
-    if (!channel.parent || !channel.parent.isTextBased() || !('fetchWebhooks' in channel.parent)) {
+    if (!channel.parent || !hasWebhookMethods(channel.parent)) {
       throw new Error('Target thread does not have a webhook-capable parent channel.');
     }
 
     return {
       webhookChannel: channel.parent,
       threadId: channel.id,
+      threadName: undefined,
     };
   }
 
-  if (!channel.isTextBased() || !('fetchWebhooks' in channel)) {
+  if (!hasWebhookMethods(channel)) {
     throw new Error('Target channel does not support webhooks.');
   }
 
   return {
     webhookChannel: channel,
     threadId: undefined,
+    threadName: undefined,
   };
 }
 
@@ -121,6 +157,7 @@ async function replayMessageWithWebhook(message, targetChannel) {
     files,
     allowedMentions: { parse: [] },
     threadId,
+    threadName: targetChannel.type === ChannelType.GuildForum ? createForumThreadName(message) : undefined,
   });
 }
 
@@ -238,7 +275,7 @@ async function handleMoveSelection(interaction) {
 
   if (!isSupportedMoveTarget(targetChannel)) {
     await interaction.editReply({
-      content: 'Please choose a text channel or thread in this server.',
+      content: 'Please choose a text channel, thread, or forum channel in this server.',
       components: [],
     });
     return;
