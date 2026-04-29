@@ -364,8 +364,8 @@ client.on(Events.GuildMemberAdd, async (member) => {
   const helpLink = help ? `<#${help.id}>` : '#help';
 
   const message =
-    `Hey ${member.user.username} :wave: welcome to the WebODM Community! If you want to connect with others, how about some ${introLink}? ` +
-    `Feel free to just look around. If you need help, open a topic in ${helpLink}. Be polite, respect others. Have fun! `;
+    `Hey ${member.user.username} :wave: welcome to the WebODM Community! If you want to connect with others check ${introLink} ` +
+    `Feel free to look around! If you need help, open a topic in ${helpLink}. Be polite, respect others. Have fun! `;
 
   try {
     await member.send(message);
