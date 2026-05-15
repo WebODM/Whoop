@@ -51,7 +51,7 @@ function getRankAward(position) {
     return '🥉';
   }
 
-  return '';
+  return ' ';
 }
 
 function padCell(value, width) {
