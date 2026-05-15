@@ -210,7 +210,7 @@ export async function fetchCredits(apiKey, referenceDate = new Date()) {
 
 function findHangarChannel(guild) {
   return guild.channels.cache.find(
-    (channel) => channel.name === HANGAR_CHANNEL_NAME && channel.isTextBased() && typeof channel.send === 'function',
+    (channel) => channel.name.indexOf(HANGAR_CHANNEL_NAME) !== -1 && channel.isTextBased() && typeof channel.send === 'function',
   );
 }
 
