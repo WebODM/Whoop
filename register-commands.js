@@ -12,6 +12,10 @@ const commands = [
   new SlashCommandBuilder()
     .setName('ping')
     .setDescription('Replies with pong!'),
+  new SlashCommandBuilder()
+    .setName('testleaderboard')
+    .setDescription('Test the monthly translator leaderboard in #hangar.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   new ContextMenuCommandBuilder()
     .setName('Move')
     .setType(ApplicationCommandType.Message)

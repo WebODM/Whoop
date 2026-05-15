@@ -10,6 +10,10 @@ import {
   MessageFlags,
   Message
 } from 'discord.js';
+import {
+  maybePostMonthlyTranslatorLeaderboard,
+  postTranslatorLeaderboard,
+} from './translator-leaderboard.js';
 
 
 const MOVE_WEBHOOK_NAME = 'Whoop Move Relay';
@@ -21,6 +25,7 @@ const MOVE_TARGET_CHANNEL_TYPES = [
   ChannelType.PrivateThread,
   ChannelType.AnnouncementThread,
 ];
+const MONTHLY_LEADERBOARD_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 const client = new Client({
   intents: [
@@ -31,6 +36,23 @@ const client = new Client({
 
 client.once(Events.ClientReady, (c) => {
   console.log(`Logged in as ${c.user.tag}`);
+
+  const weblateKey = process.env.WEBLATE_KEY;
+
+  if (!weblateKey) {
+    console.warn('WEBLATE_KEY is not configured; translator leaderboard is disabled.');
+    return;
+  }
+
+  maybePostMonthlyTranslatorLeaderboard(c, weblateKey).catch((error) => {
+    console.error('Failed to run monthly translator leaderboard:', error);
+  });
+
+  setInterval(() => {
+    maybePostMonthlyTranslatorLeaderboard(c, weblateKey).catch((error) => {
+      console.error('Failed to run monthly translator leaderboard:', error);
+    });
+  }, MONTHLY_LEADERBOARD_CHECK_INTERVAL_MS).unref();
 });
 
 function hasMoveAccess(member) {
@@ -350,6 +372,47 @@ async function handleMoveSelection(interaction) {
   }
 }
 
+async function handleTranslatorLeaderboardCommand(interaction) {
+  if (!interaction.inGuild()) {
+    await interaction.reply({
+      content: 'The testleaderboard command can only be used inside a server.',
+      messageFlags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+
+  if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+    await interaction.reply({
+      content: 'Only administrators can use this command.',
+      messageFlags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const weblateKey = process.env.WEBLATE_KEY;
+
+  if (!weblateKey) {
+    await interaction.reply({
+      content: 'WEBLATE_KEY is not configured for the bot.',
+      messageFlags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  await interaction.deferReply({ messageFlags: MessageFlags.Ephemeral });
+
+  try {
+    const period = await postTranslatorLeaderboard(interaction.guild, weblateKey);
+
+    await interaction.editReply(`Posted the translator leaderboard for ${period.label} in #hangar.`);
+  } catch (error) {
+    console.error('Failed to post translator leaderboard:', error);
+    await interaction.editReply(`Could not post translator leaderboard: ${error.message}`);
+  }
+}
+
 // Greet new members via DM
 client.on(Events.GuildMemberAdd, async (member) => {
   // Find channels by name
@@ -380,6 +443,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand() && interaction.commandName === 'ping') {
       await interaction.reply('pong!');
+      return;
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === 'testleaderboard') {
+      await handleTranslatorLeaderboardCommand(interaction);
       return;
     }
 

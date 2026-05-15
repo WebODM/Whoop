@@ -22,9 +22,11 @@ Create a `.env` file:
 DISCORD_TOKEN=your_bot_token
 APP_ID=your_application_id
 MODERATOR_ROLE_NAME=Moderator
+WEBLATE_KEY=your_weblate_api_key
 ```
 
 `MODERATOR_ROLE_NAME` is optional and defaults to `Moderator`.
+`WEBLATE_KEY` is required for the monthly translator leaderboard.
 
 Register slash commands:
 
@@ -43,6 +45,12 @@ For development:
 ```sh
 npm run dev
 ```
+
+## Translator Leaderboard
+
+On the first day of each month, the bot fetches the previous month's credits from Weblate and posts a translator leaderboard in the `#hangar` channel.
+
+Administrators can also trigger the same post manually with `/testleaderboard`. The command is hidden from non-admin members by default and also checked again at runtime.
 
 ## Move Command
 
