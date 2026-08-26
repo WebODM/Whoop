@@ -13,9 +13,29 @@ const commands = [
     .setName('ping')
     .setDescription('Replies with pong!'),
   new SlashCommandBuilder()
-    .setName('testleaderboard')
-    .setDescription('Test the monthly translator leaderboard in #hangar.')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    .setName('mentionblock')
+    .setDescription('Manage users who are not allowed to @ mention others.')
+    .setDMPermission(false)
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('add')
+        .setDescription('Block a user from @ mentioning others.')
+        .addUserOption((option) =>
+          option.setName('user').setDescription('The user to block.').setRequired(true),
+        ),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('remove')
+        .setDescription('Allow a user to @ mention others again.')
+        .addUserOption((option) =>
+          option.setName('user').setDescription('The user to unblock.').setRequired(true),
+        ),
+    )
+    .addSubcommand((subcommand) =>
+      subcommand.setName('list').setDescription('Show who is blocked from @ mentioning.'),
+    ),
   new ContextMenuCommandBuilder()
     .setName('Move')
     .setType(ApplicationCommandType.Message)

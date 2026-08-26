@@ -8,12 +8,16 @@ import {
   GatewayIntentBits,
   PermissionFlagsBits,
   MessageFlags,
-  Message
+  Message,
+  Partials
 } from 'discord.js';
 import {
-  maybePostMonthlyTranslatorLeaderboard,
-  postTranslatorLeaderboard,
-} from './translator-leaderboard.js';
+  blockUser,
+  enforceMentionPolicy,
+  listBlockedUsers,
+  loadMentionBlocks,
+  unblockUser,
+} from './mention-guard.js';
 
 
 const MOVE_WEBHOOK_NAME = 'Whoop Move Relay';
@@ -25,37 +29,23 @@ const MOVE_TARGET_CHANNEL_TYPES = [
   ChannelType.PrivateThread,
   ChannelType.AnnouncementThread,
 ];
-const MONTHLY_LEADERBOARD_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
   ],
+  partials: [Partials.Message],
 });
 
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
   console.log(`Logged in as ${c.user.tag}`);
 
-  const weblateKey = process.env.WEBLATE_KEY;
-
-  if (!weblateKey) {
-    console.warn('WEBLATE_KEY is not configured; translator leaderboard is disabled.');
-    return;
-  }
-
-  maybePostMonthlyTranslatorLeaderboard(c, weblateKey).catch((error) => {
-    console.error('Failed to run monthly translator leaderboard:', error);
-  });
-
-  setInterval(() => {
-    maybePostMonthlyTranslatorLeaderboard(c, weblateKey).catch((error) => {
-      console.error('Failed to run monthly translator leaderboard:', error);
-    });
-  }, MONTHLY_LEADERBOARD_CHECK_INTERVAL_MS).unref();
+  await loadMentionBlocks();
 });
 
-function hasMoveAccess(member) {
+function hasModeratorAccess(member) {
   return (
     member.permissions.has(PermissionFlagsBits.Administrator) ||
     member.roles.cache.some((role) => role.name.toLowerCase() === 'moderator')
@@ -207,17 +197,17 @@ async function handleMoveCommand(interaction) {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: 'The Move command can only be used inside a server.',
-      messageFlags: MessageFlags.Ephemeral
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
 
   const member = await interaction.guild.members.fetch(interaction.user.id);
 
-  if (!hasMoveAccess(member)) {
+  if (!hasModeratorAccess(member)) {
     await interaction.reply({
       content: 'Only moderators or administrators can move messages.',
-      messageFlags: MessageFlags.Ephemeral
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
@@ -225,7 +215,7 @@ async function handleMoveCommand(interaction) {
   if (!isGuildTextMessageChannel(interaction.targetMessage.channel)) {
     await interaction.reply({
       content: 'That message is not in a supported source channel.',
-      messageFlags: MessageFlags.Ephemeral
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
@@ -248,7 +238,7 @@ async function handleMoveCommand(interaction) {
   await interaction.reply({
     content: ``,
     components: [row],
-    messageFlags: MessageFlags.Ephemeral
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -258,7 +248,7 @@ async function handleMoveSelection(interaction) {
   if (!moveContext) {
     await interaction.reply({
       content: 'That move request is invalid.',
-      messageFlags: MessageFlags.Ephemeral
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
@@ -266,7 +256,7 @@ async function handleMoveSelection(interaction) {
   if (moveContext.userId !== interaction.user.id) {
     await interaction.reply({
       content: 'Only the moderator who opened this move menu can use it.',
-      messageFlags: MessageFlags.Ephemeral
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
@@ -275,7 +265,7 @@ async function handleMoveSelection(interaction) {
 
   const member = await interaction.guild.members.fetch(interaction.user.id);
 
-  if (!hasMoveAccess(member)) {
+  if (!hasModeratorAccess(member)) {
     await interaction.editReply({
       content: 'You no longer have permission to move messages.',
       components: [],
@@ -372,46 +362,97 @@ async function handleMoveSelection(interaction) {
   }
 }
 
-async function handleTranslatorLeaderboardCommand(interaction) {
+async function handleMentionBlockCommand(interaction) {
   if (!interaction.inGuild()) {
     await interaction.reply({
-      content: 'The testleaderboard command can only be used inside a server.',
-      messageFlags: MessageFlags.Ephemeral
+      content: 'The mentionblock command can only be used inside a server.',
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
 
   const member = await interaction.guild.members.fetch(interaction.user.id);
 
-  if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+  if (!hasModeratorAccess(member)) {
     await interaction.reply({
-      content: 'Only administrators can use this command.',
-      messageFlags: MessageFlags.Ephemeral
+      content: 'Only moderators or administrators can manage mention blocks.',
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
 
-  const weblateKey = process.env.WEBLATE_KEY;
+  const subcommand = interaction.options.getSubcommand();
 
-  if (!weblateKey) {
+  if (subcommand === 'list') {
+    const blockedUsers = listBlockedUsers(interaction.guildId);
+
+    if (blockedUsers.length === 0) {
+      await interaction.reply({
+        content: 'Nobody is blocked from @ mentioning right now.',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const lines = blockedUsers.map((entry) => {
+      const blockedOn = entry.blockedAt ? entry.blockedAt.slice(0, 10) : 'unknown date';
+
+      return `- <@${entry.userId}> (blocked by <@${entry.blockedBy}> on ${blockedOn})`;
+    });
+
     await interaction.reply({
-      content: 'WEBLATE_KEY is not configured for the bot.',
-      messageFlags: MessageFlags.Ephemeral
+      content: `Blocked from @ mentioning:\n${lines.join('\n')}`,
+      allowedMentions: { parse: [] },
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
 
-  await interaction.deferReply({ messageFlags: MessageFlags.Ephemeral });
+  const targetUser = interaction.options.getUser('user');
 
+  if (subcommand === 'add') {
+    if (targetUser.bot) {
+      await interaction.reply({
+        content: 'Bots cannot be blocked from @ mentioning.',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const blocked = await blockUser(interaction.guildId, targetUser.id, interaction.user.id);
+
+    await interaction.reply({
+      content: blocked
+        ? `<@${targetUser.id}> can no longer @ mention people. Their messages with mentions will be removed.`
+        : `<@${targetUser.id}> is already blocked from @ mentioning.`,
+      allowedMentions: { parse: [] },
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const unblocked = await unblockUser(interaction.guildId, targetUser.id);
+
+  await interaction.reply({
+    content: unblocked
+      ? `<@${targetUser.id}> can @ mention people again.`
+      : `<@${targetUser.id}> was not blocked from @ mentioning.`,
+    allowedMentions: { parse: [] },
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+// Remove mentions posted by blocked users
+async function guardMessage(message) {
   try {
-    const period = await postTranslatorLeaderboard(interaction.guild, weblateKey);
-
-    await interaction.editReply(`Posted the translator leaderboard for ${period.label} in #hangar.`);
+    await enforceMentionPolicy(message);
   } catch (error) {
-    console.error('Failed to post translator leaderboard:', error);
-    await interaction.editReply(`Could not post translator leaderboard: ${error.message}`);
+    console.error('Mention guard failed:', error);
   }
 }
+
+client.on(Events.MessageCreate, guardMessage);
+client.on(Events.MessageUpdate, (oldMessage, newMessage) => guardMessage(newMessage));
 
 // Greet new members via DM
 client.on(Events.GuildMemberAdd, async (member) => {
@@ -446,8 +487,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
-    if (interaction.isChatInputCommand() && interaction.commandName === 'testleaderboard') {
-      await handleTranslatorLeaderboardCommand(interaction);
+    if (interaction.isChatInputCommand() && interaction.commandName === 'mentionblock') {
+      await handleMentionBlockCommand(interaction);
       return;
     }
 
@@ -464,7 +505,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     const replyPayload = {
       content: 'Something went wrong while handling that interaction.',
-      messageFlags: MessageFlags.Ephemeral
+      flags: MessageFlags.Ephemeral
     };
 
     if (interaction.deferred || interaction.replied) {
