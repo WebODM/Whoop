@@ -118,8 +118,7 @@ export function containsSwearWords(text) {
 
 function buildReminderMessage(message, censoredCopy) {
   let reminder =
-    `Hi ${message.author.username}, your message in <#${message.channelId}> contained language ` +
-    `we don't allow in the WebODM community, so the offending word(s) were replaced with ` +
+    `Hi ${message.author.username}, your message in <#${message.channelId}> had some offending word(s) that were replaced with ` +
     `${CENSOR_MASK}. Please keep the conversation civil and friendly. Thanks for understanding!`;
 
   if (censoredCopy) {
