@@ -1,0 +1,68 @@
+# Blacklisted words for the language filter, one per line.
+#
+# - Lines starting with # and blank lines are ignored; "# ..." after a word is a comment.
+# - Matching is case-insensitive and whole-word only ("class" or "assess" never match "ass").
+# - Common endings are matched automatically: s, es, ed, er, ers, ing, in', y, ies, ier, iest.
+#   So "shit" also covers "shitty", "shits" and "shitting".
+# - Stretched spellings ("fuuuck") and basic leet-speak ("sh1t", "a$$") are matched too.
+# - Compound words need their own entry ("asshole" is not covered by "ass").
+#
+# The bot reads this file at startup; restart it after editing.
+
+# Profanity
+fuck
+motherfucker
+fucker
+fuckface
+fuckwit
+fucktard
+clusterfuck
+shit
+bullshit
+shithead
+horseshit
+dipshit
+ass
+asshole
+asswipe
+jackass
+dumbass
+arse
+arsehole
+bitch
+bastard
+cunt
+dick
+dickhead
+cock
+cocksucker
+prick
+pussy
+twat
+wanker
+whore
+slut
+piss
+bollocks
+goddamn
+douchebag
+
+# Slurs
+nigger
+nigga
+faggot
+fag
+retard
+tranny
+dyke
+kike
+spic
+chink
+wetback
+
+# Milder words, disabled by default. Remove the # to enable them.
+# damn
+# crap
+# hell
+# wtf
+# stfu

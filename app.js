@@ -18,9 +18,14 @@ import {
   loadMentionBlocks,
   unblockUser,
 } from './mention-guard.js';
+import { enforceLanguagePolicy, loadSwearWords } from './profanity-filter.js';
+import {
+  canManageMessages,
+  canUseWebhook,
+  relayMessage,
+} from './webhook-relay.js';
 
 
-const MOVE_WEBHOOK_NAME = 'Whoop Move Relay';
 const MOVE_TARGET_CHANNEL_TYPES = [
   ChannelType.GuildText,
   ChannelType.GuildAnnouncement,
@@ -35,6 +40,9 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
+    // Privileged: must be enabled in the Discord Developer Portal. Needed to
+    // read message text for the language filter.
+    GatewayIntentBits.MessageContent,
   ],
   partials: [Partials.Message],
 });
@@ -43,6 +51,7 @@ client.once(Events.ClientReady, async (c) => {
   console.log(`Logged in as ${c.user.tag}`);
 
   await loadMentionBlocks();
+  await loadSwearWords();
 });
 
 function hasModeratorAccess(member) {
@@ -72,125 +81,6 @@ function isGuildTextMessageChannel(channel) {
 
 function isSupportedMoveTarget(channel) {
   return channel?.guild && MOVE_TARGET_CHANNEL_TYPES.includes(channel.type);
-}
-
-function hasWebhookMethods(channel) {
-  return (
-    channel &&
-    typeof channel.fetchWebhooks === 'function' &&
-    typeof channel.createWebhook === 'function'
-  );
-}
-
-function createForumThreadName(message) {
-  const baseName = message.content
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 90);
-
-  if (baseName.length > 0) {
-    return baseName;
-  }
-
-  return `Moved message from ${message.author.username}`;
-}
-
-function getWebhookTarget(channel) {
-  if (channel.type === ChannelType.GuildForum) {
-    if (!hasWebhookMethods(channel)) {
-      throw new Error('Target forum channel does not support webhooks.');
-    }
-
-    return {
-      webhookChannel: channel,
-      threadId: undefined,
-      threadName: undefined,
-    };
-  }
-
-  if (channel.isThread()) {
-    if (!channel.parent || !hasWebhookMethods(channel.parent)) {
-      throw new Error('Target thread does not have a webhook-capable parent channel.');
-    }
-
-    return {
-      webhookChannel: channel.parent,
-      threadId: channel.id,
-      threadName: undefined,
-    };
-  }
-
-  if (!hasWebhookMethods(channel)) {
-    throw new Error('Target channel does not support webhooks.');
-  }
-
-  return {
-    webhookChannel: channel,
-    threadId: undefined,
-    threadName: undefined,
-  };
-}
-
-async function getOrCreateMoveWebhook(clientUserId, channel) {
-  const webhooks = await channel.fetchWebhooks();
-  const existingWebhook = webhooks.find(
-    (webhook) => webhook.owner?.id === clientUserId && webhook.name === MOVE_WEBHOOK_NAME,
-  );
-
-  if (existingWebhook) {
-    return existingWebhook;
-  }
-
-  return channel.createWebhook({
-    name: MOVE_WEBHOOK_NAME,
-    reason: 'Relay messages for the Move context command',
-  });
-}
-
-async function replayMessageWithWebhook(message, targetChannel) {
-  const { webhookChannel, threadId } = getWebhookTarget(targetChannel);
-  const webhook = await getOrCreateMoveWebhook(message.client.user.id, webhookChannel);
-  const files = [...message.attachments.values()].map((attachment) => ({
-    attachment: attachment.url,
-    name: attachment.name ?? `attachment-${attachment.id}`,
-  }));
-  const embeds = message.embeds.map((embed) => embed.toJSON());
-  const content = message.content.trim();
-
-  if (!content && embeds.length === 0 && files.length === 0) {
-    throw new Error('This message has no content, embeds, or attachments that can be moved.');
-  }
-
-  return webhook.send({
-    content: content || undefined,
-    username: message.member?.displayName ?? message.author.globalName ?? message.author.username,
-    avatarURL: message.author.displayAvatarURL(),
-    embeds,
-    files,
-    allowedMentions: { parse: [] },
-    threadId,
-    threadName: targetChannel.type === ChannelType.GuildForum ? createForumThreadName(message) : undefined,
-  });
-}
-
-function canManageSourceMessage(channel, botMember) {
-  const permissions = channel.permissionsFor(botMember);
-
-  return permissions?.has([
-    PermissionFlagsBits.ViewChannel,
-    PermissionFlagsBits.ReadMessageHistory,
-    PermissionFlagsBits.ManageMessages,
-  ]);
-}
-
-function canUseTargetWebhook(channel, botMember) {
-  const { webhookChannel } = getWebhookTarget(channel);
-  const permissions = webhookChannel.permissionsFor(botMember);
-
-  return permissions?.has([
-    PermissionFlagsBits.ViewChannel,
-    PermissionFlagsBits.ManageWebhooks,
-  ]);
 }
 
 async function handleMoveCommand(interaction) {
@@ -319,7 +209,7 @@ async function handleMoveSelection(interaction) {
     return;
   }
 
-  if (!canManageSourceMessage(sourceChannel, botMember)) {
+  if (!canManageMessages(sourceChannel, botMember)) {
     await interaction.editReply({
       content: 'The bot needs View Channel, Read Message History, and Manage Messages in the source channel.',
       components: [],
@@ -327,7 +217,7 @@ async function handleMoveSelection(interaction) {
     return;
   }
 
-  if (!canUseTargetWebhook(targetChannel, botMember)) {
+  if (!canUseWebhook(targetChannel, botMember)) {
     await interaction.editReply({
       content: 'The bot needs View Channel and Manage Webhooks in the destination channel or its parent channel.',
       components: [],
@@ -348,7 +238,7 @@ async function handleMoveSelection(interaction) {
   }
 
   try {
-    await replayMessageWithWebhook(sourceMessage, targetChannel);
+    await relayMessage(sourceMessage, targetChannel);
     await sourceMessage.delete();
 
     await interaction.deleteReply();
@@ -442,12 +332,29 @@ async function handleMentionBlockCommand(interaction) {
   });
 }
 
-// Remove mentions posted by blocked users
+// Remove mentions posted by blocked users, then censor offensive language
 async function guardMessage(message) {
   try {
-    await enforceMentionPolicy(message);
+    if (message.partial) {
+      message = await message.fetch();
+    }
+  } catch (error) {
+    console.error('Could not fetch message for moderation:', error.message);
+    return;
+  }
+
+  try {
+    if (await enforceMentionPolicy(message)) {
+      return;
+    }
   } catch (error) {
     console.error('Mention guard failed:', error);
+  }
+
+  try {
+    await enforceLanguagePolicy(message);
+  } catch (error) {
+    console.error('Language filter failed:', error);
   }
 }
 
