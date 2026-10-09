@@ -48,6 +48,8 @@ npm run dev
 
 The bot includes a `Move` message context-menu command. When a moderator or administrator right-clicks a message and chooses `Apps` -> `Move`, the bot replies with an ephemeral channel/thread dropdown, replays the message through a webhook so the original author's display name and avatar are preserved, and deletes the original message after the replay succeeds.
 
+After a successful move the bot DMs the original author: `Your message "{first 5 words}" has been moved to #channel`. If the author has DMs closed the move still succeeds and the failure is only logged.
+
 Required bot permissions:
 
 - `Manage Webhooks` in the destination channel, or in the parent channel when moving into a thread

@@ -83,6 +83,27 @@ function isSupportedMoveTarget(channel) {
   return channel?.guild && MOVE_TARGET_CHANNEL_TYPES.includes(channel.type);
 }
 
+function buildMoveNotice(message, destinationChannelId) {
+  const words = message.content.split(/\s+/).filter(Boolean);
+  const preview = words.slice(0, 5).join(' ') + (words.length > 5 ? '...' : '');
+  const subject = preview ? `Your message "${preview}"` : 'Your message';
+
+  return `${subject} has been moved to <#${destinationChannelId}>`;
+}
+
+async function notifyMovedAuthor(message, destinationChannelId) {
+  // Webhook and bot authors cannot receive DMs.
+  if (message.webhookId || message.author.bot) {
+    return;
+  }
+
+  try {
+    await message.author.send(buildMoveNotice(message, destinationChannelId));
+  } catch (error) {
+    console.error(`Could not DM ${message.author.tag}:`, error.message);
+  }
+}
+
 async function handleMoveCommand(interaction) {
   if (!interaction.inGuild()) {
     await interaction.reply({
@@ -238,8 +259,11 @@ async function handleMoveSelection(interaction) {
   }
 
   try {
-    await relayMessage(sourceMessage, targetChannel);
+    // Moving into a forum creates a new post, so link to where the relayed
+    // message actually landed rather than the forum itself.
+    const relayedMessage = await relayMessage(sourceMessage, targetChannel);
     await sourceMessage.delete();
+    await notifyMovedAuthor(sourceMessage, relayedMessage.channelId ?? targetChannel.id);
 
     await interaction.deleteReply();
   } catch (error) {
